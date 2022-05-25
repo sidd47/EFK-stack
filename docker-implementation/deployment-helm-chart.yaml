@@ -1,0 +1,92 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "svc.fullname" . }}
+  labels:
+    {{- include "svc.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "svc.selectorLabels" . | nindent 6 }}
+{{- with .Values.strategy }}
+  strategy:
+      {{- toYaml . | nindent 4 }}
+{{- end }}
+  template:
+    metadata:
+      labels:
+        {{- include "svc.selectorLabels" . | nindent 8 }}
+    spec:
+    {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+      serviceAccountName: {{ include "svc.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}                                 
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+           - name: project_version
+             value: {{ .Chart.AppVersion }}
+           - name: srv_name
+             value: {{ .Chart.Name }}
+           - name: environment
+             value: {{ .Values.namespace }}
+           - name: NEW_RELIC_LICENSE_KEY
+             valueFrom:
+                secretKeyRef:
+                  name: newrelic-key
+                  key: NEW_RELIC_KEY
+          ports:
+            - name: healthport
+              containerPort: {{ .Values.service.hcport }}
+              protocol: TCP
+          volumeMounts:
+            - name: log-storage
+              mountPath: /etc/service/svc/log/main  
+          livenessProbe:
+            httpGet:
+              path: /admin/ping
+              port: healthport
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 1
+          readinessProbe:
+            httpGet:
+              path: /admin/healthcheck
+              port: healthport
+            initialDelaySeconds: 80
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 1
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+        - name: sidecar-log-collector    
+          image: registry.devops.mhealth.tech/fluent_bit:v5
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+           - name: project_version
+             value: {{ .Chart.AppVersion }}
+           - name: srv_name
+             value: {{ .Chart.Name }}
+           - name: environment
+             value: {{ .Values.namespace }}
+          resources:
+            limits:
+              cpu: 100m
+              memory: 200Mi
+          volumeMounts:
+            - name: log-storage
+              mountPath: /mnt/log  
+      volumes:
+        - name: log-storage
+          emptyDir: {}
